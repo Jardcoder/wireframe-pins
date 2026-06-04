@@ -331,6 +331,15 @@
         .ob-body{padding:20px}
         .ob-footer{padding:14px 20px;flex-direction:column;gap:12px}
       }
+
+      /* Mobile: compact full-width toolbar, full-screen panel, fitted forms */
+      @media(max-width:600px){
+        .wf-toolbar{left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));gap:6px}
+        .wf-tb-btn{flex:1;justify-content:center;padding:10px 8px;font-size:12px}
+        .wf-gp{width:100vw;right:-100vw}
+        .pin-pop{width:min(300px,calc(100vw - 32px))}
+        .new-pin-form{width:min(280px,calc(100vw - 32px))}
+      }
     `;
     document.head.appendChild(s);
   }
@@ -489,7 +498,7 @@
     // Create temp form
     const form = document.createElement('div');
     form.className = 'new-pin-form open';
-    form.style.left = Math.min(e.pageX, window.innerWidth - 300) + 'px';
+    form.style.left = Math.max(10, Math.min(e.pageX, window.innerWidth - 300)) + 'px'; // clamp: nunca fuera de viewport en mobile
     form.style.top = y + 'px';
 
     const author = getSavedAuthor();

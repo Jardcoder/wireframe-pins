@@ -124,6 +124,9 @@ See `docs/Wireframe-Pins-Implementation-Guide.md` for a complete reference guide
 
 ## Changelog
 
+### v1.3.1 (2026-06-03)
+- Mobile usability: compact full-width toolbar with safe-area inset, full-screen All Pins panel, popovers and pin form fitted to viewport, form position clamped on small screens.
+
 ### v1.3.0 (2026-06-03)
 - **Removed client work from the public repo:** a real client wireframe in `examples/` replaced with a generic `examples/demo/` page. Policy: no client deployments in `examples/`.
 - **Fix:** clicking a pin in the "All Pins" panel now works — same page scrolls to the pin and opens its popover; other pages deep-link via `page.html#wf-pin=<id>` and auto-open on load.

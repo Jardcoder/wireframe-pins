@@ -26,6 +26,8 @@ wireframe-pins/
 ## Features
 
 - **Pin anywhere** — Click any spot on the page to drop a numbered pin
+- **Viewer / admin roles** — Clients only add pins and reply; deleting, resolving, clearing and exporting are admin-only and enforced server-side ([details](#roles--admin-access))
+- **Responsive pins** — Pins anchor to their element, so they land correctly whether the reviewer is on mobile or desktop
 - **Element context capture** — Every pin records the HTML element and selector under the cursor so AI tools can apply changes precisely
 - **Optional screenshot** — Opt-in per pin via lazy-loaded html2canvas (400×400 around the pin)
 - **Shared & persistent** — All reviewers see the same pins (PHP backend + JSON)
@@ -53,12 +55,13 @@ your-project/
   api.php           ← From src/api.php (configure this)
 ```
 
-### 2. Configure api.php (top 3 lines)
+### 2. Configure api.php (top of the file)
 
 ```php
 $PROJECT_NAME  = 'YOUR_PROJECT';
 $SLACK_WEBHOOK = 'https://hooks.slack.com/services/...';
 $PAGE_NAMES    = ['index' => 'Home', 'about' => 'About', 'contact' => 'Contact'];
+$ADMIN_KEY     = 'pick-a-long-random-string';   // unlock admin via ?admin=THIS_KEY
 ```
 
 ### 3. Add to every HTML page
@@ -71,17 +74,49 @@ $PAGE_NAMES    = ['index' => 'Home', 'about' => 'About', 'contact' => 'Contact']
 
 ---
 
+## Roles & admin access
+
+The tool has two roles so a client can leave feedback without being able to destroy it.
+
+| Action | Viewer (client) | Admin |
+|--------|:---:|:---:|
+| Add a pin | ✅ | ✅ |
+| Reply to a pin | ✅ | ✅ |
+| See all pins / filter | ✅ | ✅ |
+| Resolve / reopen | — | ✅ |
+| Delete a pin | — | ✅ |
+| Clear all pins | — | ✅ |
+| Export `.txt` report | — | ✅ |
+
+**Everyone is a viewer by default.** Destructive and management actions are hidden from the UI *and* rejected by the server (HTTP 403) — hiding the buttons isn't the only line of defense.
+
+### Becoming an admin
+
+1. Set a secret key in `api.php`:
+   ```php
+   $ADMIN_KEY = 'pick-a-long-random-string';
+   ```
+2. Open any page once with that key in the URL:
+   ```
+   https://your-site/page.html?admin=pick-a-long-random-string
+   ```
+3. The key is saved to the browser's `localStorage` and **immediately stripped from the URL** (so it isn't left on screen or copied into a shared link). The toolbar shows an **ADMIN** tag, and resolve/delete/clear/export appear.
+
+The key is sent as an `X-Admin-Key` header on protected requests and compared server-side with `hash_equals()`. It lives only in your `api.php` on the server — never commit a real key to source control. To revoke access, change `$ADMIN_KEY` (existing browsers stop being admin) or clear `localStorage` on a given device.
+
+> **Heads-up:** the key travels in the URL on that first visit (browser history). Treat it like a password — share it privately with whoever needs admin, not in the client-facing link.
+
+---
+
 ## What changes per project
-
-> Admin: set `$ADMIN_KEY` in `api.php`, then open the site once at `?admin=<that key>` to unlock delete/resolve/clear/export. Clients (no key) can only add pins and reply.
-
 
 | What | Where |
 |------|-------|
 | Page content | Your HTML files |
-| Project name | `api.php` line 12 |
-| Page names map | `api.php` line 14 |
-| Slack webhook | `api.php` line 13 (shared across all projects) |
+| Project name | `api.php` → `$PROJECT_NAME` |
+| Page names map | `api.php` → `$PAGE_NAMES` |
+| Slack webhook | `api.php` → `$SLACK_WEBHOOK` (shared across all projects) |
+| Admin key | `api.php` → `$ADMIN_KEY` (unique per project) |
 
 `styles.css` and `comments.js` never change between projects.
 
@@ -103,19 +138,21 @@ See `docs/Wireframe-Pins-Implementation-Guide.md` for a complete reference guide
 
 ## API Reference
 
-| Method | URL | Action |
-|--------|-----|--------|
-| GET | `api.php` | All pins |
-| GET | `api.php?page=index` | Pins for one page |
-| GET | `api.php?screenshot=<id>` | JPEG binary for a pin's screenshot (404 if none) |
-| POST | `api.php` | Create `{page, x, y, author, text, context?, screenshot?}` |
-| POST | `api.php` | Reply `{reply_to, author, text}` |
-| POST | `api.php` | Resolve `{resolve: id}` |
-| DELETE | `api.php?id=abc` | Delete one (also removes its screenshot file) |
-| DELETE | `api.php?all=1` | Delete all (clears `data/screenshots/` too) |
-| GET | `api.php?export=1` | Download .txt report (includes context + screenshot path per pin) |
+| Method | URL | Action | Admin |
+|--------|-----|--------|:---:|
+| GET | `api.php` | All pins | |
+| GET | `api.php?page=index` | Pins for one page | |
+| GET | `api.php?screenshot=<id>` | JPEG binary for a pin's screenshot (404 if none) | |
+| POST | `api.php` | Create `{page, x, y, author, text, context?, anchor?, screenshot?}` | |
+| POST | `api.php` | Reply `{reply_to, author, text}` | |
+| POST | `api.php` | Resolve `{resolve: id}` | ✅ |
+| DELETE | `api.php?id=abc` | Delete one (also removes its screenshot file) | ✅ |
+| DELETE | `api.php?all=1` | Delete all (clears `data/screenshots/` too) | ✅ |
+| GET | `api.php?export=1` | Download .txt report (includes context + screenshot path per pin) | |
 
-`context` is `{selector, tag, text_content, outer_html, viewport:{width,height}}`. `screenshot` on POST is a `data:image/jpeg;base64,...` URL — the server stores the binary at `data/screenshots/<id>.jpg` and persists only the path on the pin. See `docs/Wireframe-Pins-Implementation-Guide.md` for the full schema.
+Rows marked **Admin** require the `X-Admin-Key` header (or `?key=`) to match `$ADMIN_KEY`, else they return `403`. See [Roles & admin access](#roles--admin-access).
+
+`context` is `{selector, tag, text_content, outer_html, viewport:{width,height}}`. `anchor` is `{selector, rx, ry}` — the element to pin to plus a 0–1 fractional position inside it, so pins reflow with a responsive layout. `screenshot` on POST is a `data:image/jpeg;base64,...` URL — the server stores the binary at `data/screenshots/<id>.jpg` and persists only the path on the pin. See `docs/Wireframe-Pins-Implementation-Guide.md` for the full schema.
 
 ---
 

@@ -124,6 +124,9 @@ See `docs/Wireframe-Pins-Implementation-Guide.md` for a complete reference guide
 
 ## Changelog
 
+### v1.3.2 (2026-06-03)
+- Host-page isolation: tool UI (toolbar, popovers, forms, panel, onboarding) now enforces its own font family and heading colors, so host sites with serif headings or light-on-dark themes can't bleed into the tool.
+
 ### v1.3.1 (2026-06-03)
 - Mobile usability: compact full-width toolbar with safe-area inset, full-screen All Pins panel, popovers and pin form fitted to viewport, form position clamped on small screens.
 

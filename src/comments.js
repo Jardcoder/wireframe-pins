@@ -196,6 +196,13 @@
   function injectCSS() {
     const s = document.createElement('style');
     s.textContent = `
+      /* Host-page isolation: the tool UI keeps its own font & text color
+         even on sites with serif headings / light-on-dark themes */
+      .wf-toolbar,.pin-pop,.new-pin-form,.wf-gp,.ob-modal,.wf-lightbox{
+        font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+      .pin-pop h1,.pin-pop h2,.pin-pop h3,.wf-gp h1,.wf-gp h2,.wf-gp h3,
+      .ob-modal h1,.ob-modal h2,.ob-modal h3{font-family:inherit}
+
       /* Pin marker */
       .pin{position:absolute;z-index:100;cursor:pointer;transition:transform .12s}
       .pin:hover{transform:scale(1.15)}
@@ -281,7 +288,7 @@
       .wf-gp{position:fixed;top:0;right:-440px;width:420px;height:100vh;background:#fff;border-left:2px solid #1a1a1a;z-index:600;transition:right .25s;display:flex;flex-direction:column;box-shadow:-4px 0 24px rgba(0,0,0,.12)}
       .wf-gp.open{right:0}
       .wf-gp-head{padding:16px 20px;border-bottom:2px solid #1a1a1a;display:flex;justify-content:space-between;align-items:center;background:#f5f5f5}
-      .wf-gp-head h3{font-size:16px;font-weight:700}
+      .wf-gp .wf-gp-head h3{color:#1a1a1a;font-size:16px;font-weight:700}
       .wf-gp-head button{background:none;border:none;font-size:22px;cursor:pointer;color:#999}
       .wf-gp-body{flex:1;overflow-y:auto;padding:16px 20px}
       .wf-gp-actions{padding:12px 20px;border-top:1px solid #e0e0e0;background:#fafafa;display:flex;gap:8px;flex-wrap:wrap}
@@ -308,13 +315,13 @@
       @keyframes ob-slideup{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
       .ob-modal{background:#fff;border-radius:12px;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.25);overflow:hidden;animation:ob-slideup .35s ease}
       .ob-header{background:#1a1a1a;color:#fff;padding:24px 28px 20px;text-align:center}
-      .ob-header h2{font-size:20px;font-weight:800;margin:0 0 4px;letter-spacing:-.3px}
+      .ob-modal .ob-header h2{color:#fff;font-size:20px;font-weight:800;margin:0 0 4px;letter-spacing:-.3px}
       .ob-header p{font-size:13px;color:#aaa;margin:0}
       .ob-body{padding:24px 28px}
       .ob-step{display:flex;gap:14px;margin-bottom:20px;align-items:flex-start}
       .ob-step:last-child{margin-bottom:0}
       .ob-step-num{width:36px;height:36px;border-radius:50%;background:#e00;color:#fff;font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-      .ob-step-content h3{font-size:14px;font-weight:700;color:#1a1a1a;margin:0 0 3px}
+      .ob-modal .ob-step-content h3{font-size:14px;font-weight:700;color:#1a1a1a;margin:0 0 3px}
       .ob-step-content p{font-size:13px;color:#666;margin:0;line-height:1.5}
       .ob-step-content kbd{background:#f0f0f0;border:1px solid #ccc;border-radius:3px;padding:1px 5px;font-size:11px;font-family:inherit;color:#333}
       .ob-tips{background:#f9f9f9;border-radius:6px;padding:12px 16px;margin-top:16px;font-size:12px;color:#666;line-height:1.6}

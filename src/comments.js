@@ -11,6 +11,25 @@
   let pinsVisible = true;
   let lastFetchOk = false;
 
+  // ── Admin mode ──
+  // Open any page with ?admin=<key> once to unlock admin controls (delete,
+  // resolve, clear, export). The key is remembered in localStorage and sent
+  // with destructive requests; viewers (clients) can only add pins and reply.
+  function initAdmin() {
+    const m = window.location.search.match(/[?&]admin=([^&]+)/);
+    if (m) {
+      localStorage.setItem('wf-admin-key', decodeURIComponent(m[1]));
+      // strip ?admin= from the URL so the key isn't left on screen / re-shared
+      const url = window.location.pathname +
+        window.location.search.replace(/([?&])admin=[^&]+(&|$)/, '$1').replace(/[?&]$/, '') +
+        window.location.hash;
+      history.replaceState(null, '', url);
+    }
+  }
+  function adminKey() { return localStorage.getItem('wf-admin-key') || ''; }
+  function isAdmin() { return !!adminKey(); }
+  function adminHeaders() { return isAdmin() ? { 'X-Admin-Key': adminKey() } : {}; }
+
   // ── API ──
   async function fetchPins() {
     try {
@@ -40,7 +59,7 @@
   }
 
   async function deletePin(id) {
-    try { await fetch(API+'?id='+id, {method:'DELETE'}); } catch(e) {}
+    try { await fetch(API+'?id='+id, {method:'DELETE', headers:adminHeaders()}); } catch(e) {}
   }
 
   async function replyToPin(id, author, text) {
@@ -52,13 +71,13 @@
 
   async function toggleResolve(id) {
     try {
-      const r = await fetch(API, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({resolve:id}) });
+      const r = await fetch(API, { method:'POST', headers:Object.assign({'Content-Type':'application/json'}, adminHeaders()), body:JSON.stringify({resolve:id}) });
       return await r.json();
     } catch(e) { return null; }
   }
 
   async function clearAll() {
-    try { await fetch(API+'?all=1', {method:'DELETE'}); pins=[]; } catch(e) {}
+    try { await fetch(API+'?all=1', {method:'DELETE', headers:adminHeaders()}); pins=[]; } catch(e) {}
   }
 
   async function fetchAllPins() {
@@ -189,6 +208,47 @@
       text_content: text,
       outer_html: outer,
       viewport: { width: window.innerWidth, height: window.innerHeight }
+    };
+  }
+
+  // ── Element anchor: selector + fractional position inside the element ──
+  // Lets pins reflow with a responsive layout instead of breaking on absolute
+  // pixel coords when the reviewer's viewport differs from the author's.
+  function captureAnchor(clientX, clientY) {
+    let target;
+    try { target = document.elementFromPoint(clientX, clientY); } catch(e) { return null; }
+    if (!target) return null;
+    if (target.closest && target.closest('.wf-toolbar, .pin, .pin-pop, .new-pin-form, .wf-gp, .wf-overlay, .ob-overlay')) return null;
+    const anchor = findAnchor(target);
+    const r = anchor.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    return {
+      selector: buildSelector(anchor),
+      rx: Math.max(0, Math.min(1, (clientX - r.left) / r.width)),
+      ry: Math.max(0, Math.min(1, (clientY - r.top) / r.height))
+    };
+  }
+
+  // Resolve a pin's absolute page position. Prefers the element anchor (responsive),
+  // falls back to legacy x%/y for older pins or when the element is gone.
+  function pinPosition(pin) {
+    if (pin.anchor && pin.anchor.selector) {
+      let el = null;
+      try { el = document.querySelector(pin.anchor.selector); } catch(e) {}
+      if (el) {
+        const r = el.getBoundingClientRect();
+        return {
+          left: r.left + window.scrollX + pin.anchor.rx * r.width,
+          top:  r.top  + window.scrollY + pin.anchor.ry * r.height,
+          mode: 'anchor'
+        };
+      }
+    }
+    // legacy fallback: x is % of scrollWidth, y is absolute px
+    return {
+      left: (pin.x / 100) * document.documentElement.scrollWidth,
+      top:  pin.y,
+      mode: 'legacy'
     };
   }
 
@@ -339,6 +399,15 @@
         .ob-footer{padding:14px 20px;flex-direction:column;gap:12px}
       }
 
+      /* Filters in All Pins panel */
+      .wf-gp-filters{display:flex;gap:6px;padding:10px 20px;border-bottom:1px solid #e0e0e0;background:#fafafa}
+      .wf-gp-filters button{flex:1;padding:6px 8px;font-size:11px;font-weight:600;font-family:inherit;border:1px solid #ccc;border-radius:4px;background:#fff;color:#555;cursor:pointer}
+      .wf-gp-filters button.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+      .wf-gp-hint{font-size:11px;color:#999;font-style:italic;padding:2px 0}
+
+      /* Admin tag on toolbar */
+      .wf-toolbar.wf-admin::before{content:'ADMIN';position:absolute;top:-18px;right:0;font-size:9px;font-weight:700;letter-spacing:1px;color:#e00;background:#fff;padding:1px 6px;border-radius:4px;box-shadow:0 1px 4px rgba(0,0,0,.15)}
+
       /* Mobile: compact full-width toolbar, full-screen panel, fitted forms */
       @media(max-width:600px){
         .wf-toolbar{left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));gap:6px}
@@ -370,8 +439,9 @@
     pagePins.forEach((pin, i) => {
       const el = document.createElement('div');
       el.className = 'pin' + (pin.resolved ? ' resolved' : '');
-      el.style.left = pin.x + '%';
-      el.style.top = pin.y + 'px';
+      const pos = pinPosition(pin);
+      el.style.left = pos.left + 'px';
+      el.style.top = pos.top + 'px';
       el.dataset.pinId = pin.id;
 
       // Respect visibility toggle
@@ -386,7 +456,7 @@
       const pop = document.createElement('div');
       pop.className = 'pin-pop';
       // Flip if too close to right edge
-      if (pin.x > 60) pop.classList.add('flip-left');
+      if (pos.left > document.documentElement.scrollWidth * 0.6) pop.classList.add('flip-left');
 
       const repliesHtml = (pin.replies||[]).map(r => `
         <div class="pin-reply">
@@ -419,10 +489,10 @@
           <div class="pin-pop-meta">${fmtTime(pin.created_at)} ${pin.resolved?'· ✅ Resolved':''}</div>
           ${shotHtml}
           ${ctxHtml}
-          <div class="pin-pop-actions">
+          ${isAdmin() ? `<div class="pin-pop-actions">
             <button class="pin-act-resolve">${pin.resolved?'Reopen':'✓ Resolve'}</button>
             <button class="pin-act-delete danger">Delete</button>
-          </div>
+          </div>` : ''}
           ${(pin.replies||[]).length ? '<div class="pin-replies">'+repliesHtml+'</div>' : ''}
         </div>
         <div class="pin-reply-form">
@@ -450,14 +520,16 @@
       const shotImg = pop.querySelector('.pin-screenshot img');
       if (shotImg) shotImg.addEventListener('click', (e) => { e.stopPropagation(); openLightbox(shotImg.src); });
 
-      pop.querySelector('.pin-act-resolve').addEventListener('click', async () => {
+      const resolveBtn = pop.querySelector('.pin-act-resolve');
+      if (resolveBtn) resolveBtn.addEventListener('click', async () => {
         await toggleResolve(pin.id);
         await fetchPins();
         renderPins();
         updateToolbar();
       });
 
-      pop.querySelector('.pin-act-delete').addEventListener('click', async () => {
+      const deleteBtn = pop.querySelector('.pin-act-delete');
+      if (deleteBtn) deleteBtn.addEventListener('click', async () => {
         if (!confirm('Delete this pin?')) return;
         await deletePin(pin.id);
         await fetchPins();
@@ -485,6 +557,26 @@
     });
   }
 
+  // ── Reposition pins without rebuilding them (cheap; on resize / layout shifts) ──
+  function repositionPins() {
+    const page = getPage();
+    const pagePins = pins.filter(p => p.page === page);
+    pinElements.forEach(el => {
+      const pin = pagePins.find(p => p.id === el.dataset.pinId);
+      if (!pin) return;
+      const pos = pinPosition(pin);
+      el.style.left = pos.left + 'px';
+      el.style.top  = pos.top + 'px';
+    });
+  }
+
+  function setupReposition() {
+    let t;
+    const run = () => { clearTimeout(t); t = setTimeout(repositionPins, 120); };
+    window.addEventListener('resize', run, { passive: true });
+    window.addEventListener('load', () => setTimeout(repositionPins, 200)); // after images/fonts settle
+  }
+
   // ── Pin mode: click to create ──
   function handlePageClick(e) {
     if (!pinMode) return;
@@ -499,8 +591,9 @@
     const x = (e.pageX / document.documentElement.scrollWidth) * 100;
     const y = e.pageY;
 
-    // Capture context BEFORE the form opens (form would occlude the target)
+    // Capture context + element anchor BEFORE the form opens (form occludes the target)
     const context = captureContext(e.clientX, e.clientY);
+    const anchor = captureAnchor(e.clientX, e.clientY);
 
     // Create temp form
     const form = document.createElement('div');
@@ -551,6 +644,7 @@
         author: authorVal,
         text: text,
         context: context,
+        anchor: anchor,
         screenshot: screenshot
       });
 
@@ -591,6 +685,8 @@
     allBtn.className = 'wf-tb-btn';
     allBtn.innerHTML = '📋 All Pins <span class="wf-tb-badge">0</span>';
     bar.appendChild(allBtn);
+
+    if (isAdmin()) bar.classList.add('wf-admin'); // shows a small admin tag via CSS
 
     document.body.appendChild(bar);
 
@@ -641,7 +737,8 @@
   function updateToolbar() {
     const badge = document.querySelector('.wf-tb-badge');
     if (badge) {
-      const count = pins.length;
+      // Badge counts UNRESOLVED pins on this page — the actionable number
+      const count = pins.filter(p => !p.resolved).length;
       badge.textContent = count;
       badge.style.display = count > 0 ? 'inline' : 'none';
     }
@@ -663,67 +760,94 @@
     const prettyPage = (slug) => slug.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     const open = allPins.filter(p=>!p.resolved).length;
     const resolved = allPins.filter(p=>p.resolved).length;
+    let filter = 'all'; // all | open | resolved
 
-    let bodyHtml = '';
-    if (allPins.length === 0) {
-      bodyHtml = '<div class="wf-gp-empty">No pins yet.<br>Click "📌 Add Pin" then click anywhere on the page.</div>';
-    } else {
-      bodyHtml += `<div class="wf-gp-stats">
-        <span>📌 ${allPins.length} total</span>
-        <span>⏳ ${open} open</span>
-        <span>✅ ${resolved} resolved</span>
-      </div>`;
-
-      const grouped = {};
-      const pageOrder = [];
-      allPins.forEach(p => {
-        const pg = p.page||'unknown';
-        if (!grouped[pg]) { grouped[pg] = []; pageOrder.push(pg); }
-        grouped[pg].push(p);
-      });
-
-      pageOrder.forEach(pg => {
-        bodyHtml += `<div class="wf-gp-page">📄 ${esc(prettyPage(pg))} (${grouped[pg].length})</div>`;
-        grouped[pg].forEach((p, i) => {
-          const status = p.resolved ? 'resolved' : '';
-          const replies = (p.replies||[]).length;
-          bodyHtml += `
-            <div class="wf-gp-item" data-page="${pg}" data-id="${p.id}">
-              <div class="wf-gp-item-head">
-                <div><span class="wf-gp-item-num ${status}">${i+1}</span> <strong>${esc(p.author)}</strong></div>
-                <span style="font-size:11px;color:#999">${p.resolved?'✅':'⏳'}${replies?' · '+replies+' replies':''}</span>
-              </div>
-              <div style="margin-top:4px;color:#444">${esc(p.text)}</div>
-              <div class="wf-gp-item-meta">${fmtTime(p.created_at)}</div>
-            </div>
-          `;
-        });
-      });
-    }
+    const adminActions = isAdmin() ? `
+      <button class="gp-export">Export .txt</button>
+      <button class="gp-clear danger">Clear All</button>` : `
+      <span class="wf-gp-hint">Add pins and reply to leave feedback.</span>`;
 
     panel.innerHTML = `
       <div class="wf-gp-head">
         <h3>All Pin Feedback</h3>
         <button class="gp-close">×</button>
       </div>
-      <div class="wf-gp-body">${bodyHtml}</div>
-      <div class="wf-gp-actions">
-        <button class="gp-export">Export .txt</button>
-        <button class="gp-clear danger">Clear All</button>
+      <div class="wf-gp-filters">
+        <button data-f="all" class="active">All ${allPins.length}</button>
+        <button data-f="open">⏳ Open ${open}</button>
+        <button data-f="resolved">✅ Resolved ${resolved}</button>
       </div>
+      <div class="wf-gp-body"></div>
+      <div class="wf-gp-actions">${adminActions}</div>
     `;
     document.body.appendChild(panel);
 
-    const close = () => { panel.remove(); overlay.remove(); };
+    const body = panel.querySelector('.wf-gp-body');
 
+    function renderList() {
+      const shown = allPins.filter(p => filter === 'all' || (filter === 'open' ? !p.resolved : p.resolved));
+      if (shown.length === 0) {
+        body.innerHTML = allPins.length === 0
+          ? '<div class="wf-gp-empty">No pins yet.<br>Click "📌 Add Pin" then click anywhere on the page.</div>'
+          : '<div class="wf-gp-empty">Nothing in this filter.</div>';
+        return;
+      }
+      const grouped = {}; const pageOrder = [];
+      shown.forEach(p => {
+        const pg = p.page||'unknown';
+        if (!grouped[pg]) { grouped[pg] = []; pageOrder.push(pg); }
+        grouped[pg].push(p);
+      });
+      let h = '';
+      pageOrder.forEach(pg => {
+        h += `<div class="wf-gp-page">📄 ${esc(prettyPage(pg))} (${grouped[pg].length})</div>`;
+        grouped[pg].forEach((p, i) => {
+          const replies = (p.replies||[]).length;
+          h += `
+            <div class="wf-gp-item" data-page="${pg}" data-id="${p.id}">
+              <div class="wf-gp-item-head">
+                <div><span class="wf-gp-item-num ${p.resolved?'resolved':''}">${i+1}</span> <strong>${esc(p.author)}</strong></div>
+                <span style="font-size:11px;color:#999">${p.resolved?'✅':'⏳'}${replies?' · '+replies+' replies':''}</span>
+              </div>
+              <div style="margin-top:4px;color:#444">${esc(p.text)}</div>
+              <div class="wf-gp-item-meta">${fmtTime(p.created_at)}</div>
+            </div>`;
+        });
+      });
+      body.innerHTML = h;
+      bindItems();
+    }
+
+    function bindItems() {
+      body.querySelectorAll('.wf-gp-item').forEach(item => {
+        item.addEventListener('click', () => {
+          const pg = item.dataset.page, id = item.dataset.id;
+          if (pg !== getPage()) {
+            window.location.href = pg + '.html#wf-pin=' + encodeURIComponent(id);
+          } else { close(); focusPin(id); }
+        });
+      });
+    }
+
+    const close = () => { panel.remove(); overlay.remove(); };
     panel.querySelector('.gp-close').addEventListener('click', close);
     overlay.addEventListener('click', close);
 
-    panel.querySelector('.gp-export').addEventListener('click', () => {
-      window.open(API+'?export=1', '_blank');
+    panel.querySelectorAll('.wf-gp-filters button').forEach(b => {
+      b.addEventListener('click', () => {
+        filter = b.dataset.f;
+        panel.querySelectorAll('.wf-gp-filters button').forEach(x => x.classList.toggle('active', x === b));
+        renderList();
+      });
     });
 
-    panel.querySelector('.gp-clear').addEventListener('click', async () => {
+    const exportBtn = panel.querySelector('.gp-export');
+    if (exportBtn) exportBtn.addEventListener('click', () => {
+      window.open(API + '?export=1&key=' + encodeURIComponent(adminKey()), '_blank');
+    });
+
+    const clearBtn = panel.querySelector('.gp-clear');
+    if (clearBtn) clearBtn.addEventListener('click', async () => {
       if (!confirm('Delete ALL pins on ALL pages?')) return;
       await clearAll();
       renderPins();
@@ -731,19 +855,7 @@
       close();
     });
 
-    // Click on item → jump to that pin (same page: scroll+open; other page: deep link)
-    panel.querySelectorAll('.wf-gp-item').forEach(item => {
-      item.addEventListener('click', () => {
-        const pg = item.dataset.page;
-        const id = item.dataset.id;
-        if (pg !== getPage()) {
-          window.location.href = pg + '.html#wf-pin=' + encodeURIComponent(id);
-        } else {
-          close();
-          focusPin(id);
-        }
-      });
-    });
+    renderList();
   }
 
   // ── Scroll to a pin and open its popover ──
@@ -855,7 +967,7 @@
             <div class="ob-step-num">4</div>
             <div class="ob-step-content">
               <h3>Review all pins</h3>
-              <p>Click "📋 All Pins" to see every comment across all pages. You can reply to pins, resolve them, or export a report.</p>
+              <p>Click "📋 All Pins" to see every comment across all pages, filter by open/resolved, and reply to keep the conversation in one place.</p>
             </div>
           </div>
           <div class="ob-tips">
@@ -903,12 +1015,14 @@
 
   // ── Init ──
   async function init() {
+    initAdmin();
     injectCSS();
     await fetchPins();
     renderPins();
     createToolbar();
     setupClickHandler();
     setupKeyboard();
+    setupReposition();
     startAutoRefresh();
     showOnboarding();
     handleDeepLink();

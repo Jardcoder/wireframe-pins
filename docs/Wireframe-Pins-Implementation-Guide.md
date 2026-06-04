@@ -90,6 +90,7 @@ Create this file in the same directory as your HTML pages.
 // └─────────────────────────────────────────────┘
 
 $PROJECT_NAME   = 'CHANGE_ME';  // e.g. 'ACME', 'MyClient'
+$ADMIN_KEY      = 'CHANGE_ME';   // unlock admin via ?admin=THIS_KEY
 $SLACK_WEBHOOK  = 'PASTE_WEBHOOK_URL_HERE';
 $PAGE_NAMES     = [
     'index'     => 'Home',

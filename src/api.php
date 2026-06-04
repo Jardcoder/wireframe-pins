@@ -24,6 +24,9 @@ $PAGE_NAMES     = [
     'contact' => 'Contact',
     // Add your pages here: 'filename' => 'Display Name'
 ];
+// Admin key — clients only add/reply; deleting, resolving and clearing require this
+// key. Open the site as ?admin=THIS_KEY once (it's remembered) to unlock admin controls.
+$ADMIN_KEY      = 'change-me-admin-key';
 
 /* ── Slack notification ── */
 function notifySlack($message) {
@@ -47,11 +50,27 @@ function getPageLabel($page) {
     return $PAGE_NAMES[$page] ?? ucfirst($page);
 }
 
+/* ── Admin check ── key via X-Admin-Key header or ?key= ── */
+function isAdmin() {
+    global $ADMIN_KEY;
+    if (empty($ADMIN_KEY) || $ADMIN_KEY === 'change-me-admin-key') return false;
+    $sent = $_SERVER['HTTP_X_ADMIN_KEY'] ?? ($_GET['key'] ?? '');
+    return is_string($sent) && hash_equals($ADMIN_KEY, $sent);
+}
+
+function requireAdmin() {
+    if (!isAdmin()) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Admin only']);
+        exit;
+    }
+}
+
 /* ── Headers ── */
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
+header('Access-Control-Allow-Headers: Content-Type, X-Admin-Key');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
@@ -79,9 +98,11 @@ function loadComments() {
     return is_array($data) ? $data : [];
 }
 
-// LOCK_EX: two simultaneous POSTs must not lose pins
+// LOCK_EX: two simultaneous POSTs must not lose pins.
+// Keeps last-good copy in comments.json.bak in case a write corrupts the file.
 function saveComments($data) {
     global $dataFile;
+    if (file_exists($dataFile)) @copy($dataFile, $dataFile . '.bak');
     file_put_contents(
         $dataFile,
         json_encode(array_values($data), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
@@ -107,6 +128,18 @@ function sanitizeContext($ctx) {
         'text_content' => $text,
         'outer_html'   => $outer,
         'viewport'     => ['width' => $vw, 'height' => $vh]
+    ];
+}
+
+// Anchor = element selector + fractional position inside it (0..1), so pins
+// reflow with the layout instead of using absolute pixel coords.
+function sanitizeAnchor($a) {
+    if (!is_array($a) || empty($a['selector'])) return null;
+    $clamp = function($v) { $v = (float)$v; return $v < 0 ? 0 : ($v > 1 ? 1 : $v); };
+    return [
+        'selector' => mb_substr(strip_tags((string)$a['selector']), 0, 500),
+        'rx'       => $clamp($a['rx'] ?? 0.5),
+        'ry'       => $clamp($a['ry'] ?? 0.5)
     ];
 }
 
@@ -204,8 +237,9 @@ if ($method === 'POST') {
         exit;
     }
 
-    // Resolve / Reopen
+    // Resolve / Reopen (admin only)
     if (!empty($input['resolve'])) {
+        requireAdmin();
         $id = $input['resolve'];
         foreach ($comments as &$c) {
             if ($c['id'] === $id) {
@@ -238,7 +272,8 @@ if ($method === 'POST') {
         'created_at' => date('c'),
         'resolved'   => false,
         'replies'    => [],
-        'context'    => sanitizeContext($input['context'] ?? null)
+        'context'    => sanitizeContext($input['context'] ?? null),
+        'anchor'     => sanitizeAnchor($input['anchor'] ?? null)
     ];
 
     if (!empty($input['screenshot']) && is_string($input['screenshot'])) {
@@ -265,8 +300,9 @@ if ($method === 'POST') {
     exit;
 }
 
-/* ── DELETE ── */
+/* ── DELETE (admin only) ── */
 if ($method === 'DELETE') {
+    requireAdmin();
     if (isset($_GET['all'])) {
         $shotDir = $dataDir . '/screenshots';
         if (is_dir($shotDir)) {

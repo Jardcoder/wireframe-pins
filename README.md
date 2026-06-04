@@ -73,6 +73,9 @@ $PAGE_NAMES    = ['index' => 'Home', 'about' => 'About', 'contact' => 'Contact']
 
 ## What changes per project
 
+> Admin: set `$ADMIN_KEY` in `api.php`, then open the site once at `?admin=<that key>` to unlock delete/resolve/clear/export. Clients (no key) can only add pins and reply.
+
+
 | What | Where |
 |------|-------|
 | Page content | Your HTML files |
@@ -123,6 +126,13 @@ See `docs/Wireframe-Pins-Implementation-Guide.md` for a complete reference guide
 ---
 
 ## Changelog
+
+### v1.4.0 (2026-06-04)
+- **Roles (viewer vs admin):** clients can only add pins and reply. Delete, resolve, clear-all and export are admin-only, enforced server-side (`$ADMIN_KEY` + `X-Admin-Key`/`hash_equals`), not just hidden in the UI. Unlock admin by opening any page once with `?admin=<key>` (remembered in localStorage, stripped from the URL). Protects client feedback from accidental "Clear All".
+- **Responsive pins:** pins now anchor to their element (`selector` + fractional `rx`/`ry`) and reflow with the layout, so a pin dropped on mobile lands correctly on desktop and vice-versa. Repositions on resize/load. Legacy pins fall back to old absolute coords.
+- **Panel filters:** "All Pins" panel filters by All / Open / Resolved.
+- **Badge = unresolved count** (the actionable number) instead of total.
+- **Backup:** `comments.json.bak` written on every save (last-good copy).
 
 ### v1.3.2 (2026-06-03)
 - Host-page isolation: tool UI (toolbar, popovers, forms, panel, onboarding) now enforces its own font family and heading colors, so host sites with serif headings or light-on-dark themes can't bleed into the tool.
